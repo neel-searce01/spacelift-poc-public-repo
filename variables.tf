@@ -11,3 +11,5 @@ variable "gcp_region" {
   description = "The GCP region where resources will be created."
   default     = "us-central1" # Setting a default value is often helpful.
 }
+
+#temp
