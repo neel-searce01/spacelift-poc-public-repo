@@ -22,12 +22,9 @@ provider "google" {
 
 # This is an example resource block. It tells Terraform to create a
 # Google Cloud Storage bucket.
-# "google_storage_bucket" is the resource type.
-# "example_bucket" is the local name we give this resource inside our Terraform code.
 resource "google_storage_bucket" "example_bucket" {
   # This is the globally unique name for the storage bucket.
-  # IMPORTANT: You must change this name to something unique!
-  name          = "my-unique-spacelift-demo-bucket-98765" 
+  name          = "my-unique-spacelift-demo-bucket-12345" # CHANGE THIS to a unique name
   location      = var.gcp_region
   force_destroy = true # This allows us to easily delete the bucket later
 
@@ -38,56 +35,90 @@ resource "google_storage_bucket" "example_bucket" {
   }
 }
 
-# ===================================================================
-# ==== NEW CODE: Create a basic GCP Service Account
-# ===================================================================
-# The "google_service_account" resource type creates a new service account.
-# This is a non-human identity that applications (like our VM) can use to
-# authenticate with other Google Cloud services.
-resource "google_service_account" "example_sa" {
-  # The account_id is a unique identifier for the service account within your project.
+# This resource block creates a new Service Account in your GCP project.
+resource "google_service_account" "vm_service_account" {
+  # This is the unique ID for the service account within your project.
   account_id   = var.service_account_name
-  # The display_name is a user-friendly name shown in the GCP Console.
-  display_name = "Demo Service Account for GCE VM"
+  # This is a user-friendly name that will appear in the GCP Console.
+  display_name = "Service Account for Spacelift Demo VM"
 }
 
-# ===================================================================
-# ==== NEW CODE: Create a basic GCE Virtual Machine
-# ===================================================================
-# The "google_compute_instance" resource type creates a new virtual machine.
-resource "google_compute_instance" "example_vm" {
-  # The name of the VM instance.
-  name         = var.vm_instance_name
-  # The machine type (e.g., e2-micro is a small, inexpensive option).
-  machine_type = "e2-micro"
-  # A VM must be created in a specific "zone" within a region (e.g., us-central1-a).
+
+### ADDED SECTION: Create a custom VPC Network ###
+
+# Creates a new Virtual Private Cloud (VPC) network.
+# auto_create_subnetworks = false is best practice for custom control.
+resource "google_compute_network" "custom_vpc" {
+  name                    = var.vpc_name
+  auto_create_subnetworks = false
+}
+
+
+### ADDED SECTION: Create a Subnet within the custom VPC ###
+
+# Creates a subnet in the region defined by our provider.
+# It depends on the VPC created above.
+resource "google_compute_subnetwork" "custom_subnet" {
+  name          = "spacelift-demo-subnet"
+  ip_cidr_range = var.subnet_cidr
+  region        = var.gcp_region
+  network       = google_compute_network.custom_vpc.id
+}
+
+
+### ADDED SECTION: Create a Firewall Rule to allow SSH ###
+
+# Creates a firewall rule to allow ingress traffic on TCP port 22 (SSH).
+# Without this, you will not be able to connect to your VM.
+resource "google_compute_firewall" "allow_ssh" {
+  name    = "${var.vpc_name}-allow-ssh"
+  network = google_compute_network.custom_vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  # This allows SSH traffic from any IP address. For production, you might want
+  # to restrict this to specific IP ranges (e.g., your office network).
+//  source_ranges = ["0.0.0.0/0"]
+}
+
+
+### MODIFIED SECTION: Create a GCE VM in the custom VPC ###
+
+# This resource block creates a new GCE virtual machine.
+resource "google_compute_instance" "default_vm" {
+  # The name for the VM instance.
+  name         = "spacelift-demo-vm"
+  # The machine type (e.g., e2-medium, n1-standard-1).
+  machine_type = var.gce_machine_type
+  # The zone where the VM will be created (e.g., us-central1-a).
   zone         = var.gcp_zone
 
-  # This block defines the boot disk for the VM.
+  # The boot disk configuration for the VM.
   boot_disk {
     initialize_params {
-      # This specifies the operating system image to use for the boot disk.
-      # Here, we are using a standard Debian 11 image from Google.
-      image = "debian-cloud/debian-11"
+      # The operating system image to use for the boot disk.
+      image = var.gce_disk_image
     }
   }
 
-  # This block defines the network interface for the VM.
-  # We are attaching it to the "default" network, which exists in every GCP project.
+  # The network configuration for the VM.
+  # This section is MODIFIED to use our new custom subnet instead of "default".
   network_interface {
-    network = "default"
+    subnetwork = google_compute_subnetwork.custom_subnet.id
+    # An empty access_config block assigns an ephemeral public IP address.
+    access_config {}
   }
 
-  # This block attaches the service account we created above to this VM.
-  # This allows applications running on the VM to use the identity of the service account.
+  # This section attaches the Service Account created above to this VM.
   service_account {
-    # We reference the email of the service account created in the previous block.
-    # Terraform automatically understands this dependency.
-    email  = google_service_account.example_sa.email
+    email  = google_service_account.vm_service_account.email
     scopes = ["cloud-platform"]
   }
 
-  # Labels for organization.
+  # Labels to help organize the VM.
   labels = {
     managed-by = "spacelift"
     purpose    = "integration-demo"
