@@ -76,12 +76,12 @@ resource "google_compute_firewall" "allow_ssh" {
 
   allow {
     protocol = "tcp"
-    ports    = ["22"]
+    ports    = ["22", "3389"]
   }
 
   # This allows SSH traffic from any IP address. For production, you might want
   # to restrict this to specific IP ranges (e.g., your office network).
-//  source_ranges = ["0.0.0.0/0"]
+    source_ranges = ["35.235.240.0/20"]
 }
 
 
